@@ -63,9 +63,9 @@ flowchart LR
     V --> C[kmain]
     C --> D[uart_init]
     D --> F[exception_init<br/>set VBAR]
-    F --> G["★ boot self-tests<br/>T1–T9"]
+    F --> G["★ boot self-tests<br/>T1–T5"]
     G --> D2["★ mmu_drop_identity<br/>remove PA range"]
-    D2 --> H[idle loop]
+    D2 --> H[irq_init + timer_init<br/>→ process_init_all<br/>→ process_first_run]
 
     style E fill:#ffe699,stroke:#e8a700,color:#000
     style T fill:#ffe699,stroke:#e8a700,color:#000
@@ -531,9 +531,9 @@ flowchart LR
     V --> C[kmain]
     C --> D[uart_init]
     D --> F[exception_init<br/>set VBAR]
-    F --> G["★ boot self-tests<br/>T1–T9"]
+    F --> G["★ boot self-tests<br/>T1–T5"]
     G --> D2["★ mmu_drop_identity<br/>remove PA range"]
-    D2 --> H[idle loop]
+    D2 --> H[irq_init + timer_init<br/>→ process_init_all<br/>→ process_first_run]
 
     style E fill:#ffe699,stroke:#e8a700,color:#000
     style T fill:#ffe699,stroke:#e8a700,color:#000

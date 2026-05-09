@@ -205,7 +205,7 @@ State before chapter 07:
 - 3 process chạy USR mode, round-robin bởi timer IRQ (chapter 06)
 - handle_svc chỉ in "[SVC] syscall #N" rồi return (chapter 03 test T5)
 - Abort handlers vẫn halt_forever cho mọi fault
-- user_stub.S là asm spin loop — chưa có user program thật
+- user program ban đầu là asm spin loop — chưa có user logic thật
 ```
 
 ---
@@ -611,7 +611,7 @@ Trạng thái trước chapter 07:
 - 3 process chạy USR mode, round-robin bởi timer IRQ (chapter 06)
 - handle_svc chỉ in "[SVC] syscall #N" rồi return (chapter 03 test T5)
 - Abort handlers vẫn halt_forever cho mọi fault
-- user_stub.S là asm spin loop — chưa có user program thật
+- user program ban đầu là asm spin loop — chưa có user logic thật
 ```
 
 ---

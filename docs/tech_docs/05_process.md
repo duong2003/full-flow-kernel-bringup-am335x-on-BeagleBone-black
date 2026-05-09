@@ -77,7 +77,7 @@ flowchart LR
 
 What's new: once the IRQ machinery is running, the kernel builds 3 static PCBs
 — each has its own L1 table, its own kernel stack, and its own 1 MB user
-memory (holding a copy of user_stub). TTBR0 is **not** swapped — boot_pgd is
+memory (holding a copy of its user binary). TTBR0 is **not** swapped — boot_pgd is
 still active; `current` is only a debug pointer. Only the next chapter actually
 moves the CPU into a process.
 
@@ -255,7 +255,7 @@ RAM_BASE + 0x110000  │  ★ proc_pgd[2]     (16 KB)   │
                      │  ★ processes[3]               │
                      │  SVC/IRQ/ABT/UND/FIQ stacks  │
 RAM_BASE + 0x200000  ├──────────────────────────────┤
-                     │  ★ Process 0 user memory 1MB │  ← user_stub copy
+                     │  ★ Process 0 user memory 1MB │  ← user binary
 RAM_BASE + 0x300000  ├──────────────────────────────┤
                      │  ★ Process 1 user memory 1MB │
 RAM_BASE + 0x400000  ├──────────────────────────────┤
@@ -314,32 +314,43 @@ The result:
   03), so PC is in `0xC0...`, and that entry exists in both `boot_pgd` and
   every `proc_pgd[i]`. Swapping TTBR0 doesn't need another trampoline.
 
-### Inline user stub — 3 physical copies
+### Inline user binaries — 3 physical copies
 
 The code the processes will eventually run is **embedded in the kernel
-image** as a `.user_stub` section:
+image** as a `.user_binaries` section:
 
 ```asm
-.section .user_stub, "ax"
-user_stub_start:
-    mov     r0, #1
-1:  b       1b
-user_stub_end:
+.section .user_binaries, "a"
+.align  4
+
+.global _counter_img_start
+.global _counter_img_end
+_counter_img_start:
+    .incbin "build/user/counter.bin"
+_counter_img_end:
+
+.global _runaway_img_start
+.global _runaway_img_end
+_runaway_img_start:
+    .incbin "build/user/runaway.bin"
+_runaway_img_end:
+
+.global _shell_img_start
+.global _shell_img_end
+_shell_img_start:
+    .incbin "build/user/shell.bin"
+_shell_img_end:
 ```
 
-A short instruction sequence (does nothing useful — the process isn't
-running yet). `process_init_all` uses `memcpy` to write those bytes to 3
-different PAs (PA+0x200000, PA+0x300000, PA+0x400000).
+Three real user programs (counter, runaway, shell), each built separately
+into a flat `.bin` at VA `0x40000000`, embedded via `.incbin`. Section flags
+are `"a"` (allocatable), not `"ax"` — these bytes aren't executed in-place
+inside the kernel; they're copied to per-process user memory.
 
-Why copy instead of sharing one original? If all 3 processes pointed
-`pgd[0x400]` at the same PA, then physically there would be **no isolation**
-— one chunk of RAM holds the code, and one process self-patching would
-affect the other two. A separate copy per process = real physical isolation
-at the byte level. Every instruction has its own RAM address.
-
-Later, when syscalls exist, all 3 processes execute the same logic (because
-the copies are byte-for-byte identical), but they can **modify their own
-code** without affecting the others — the correct model for a real OS.
+`process_init_all` uses `kmemcpy` to copy each binary into its own PA slot
+(PA+0x200000, PA+0x300000, PA+0x400000). Each process gets its own physical
+copy of its own binary — isolation at the byte level. Even if a process
+self-modifies code at runtime, only its own PA is affected.
 
 ### Initial kernel stack frame — built now, used later
 
@@ -371,7 +382,7 @@ high addr └──────────────┘ ← kstack_base + 8 K
 
 `process_init_all` builds this frame at setup time. The r0–r12 values are
 zero (the process starts with clean registers), pc = `USER_VIRT_BASE =
-0x40000000` (entry into the user stub), spsr = `0x10` (USR mode, IRQ+FIQ
+0x40000000` (entry into user code), spsr = `0x10` (USR mode, IRQ+FIQ
 unmasked, ARM state), sp_usr = `0x40100000` (top of user stack).
 
 The next chapter needs only 3 instructions to turn the CPU into a running
@@ -396,8 +407,8 @@ sequenceDiagram
     loop i = 0, 1, 2
         PI->>PCB: zero, set pid/name/state=READY
         PI->>PCB: pgd = proc_pgd[i]<br/>kstack = proc_kstack[i]<br/>user_pa = RAM+0x200000+i*0x100000
-        PI->>MC: memcpy(user_pa, user_stub_start, stub_size)
-        Note over MC: 3 physical copies
+        PI->>MC: kmemcpy(user_va, img->start, img_size)
+        Note over MC: 3 distinct binaries
         PI->>PG: pgtable_build_for_proc(pgd, user_pa)
         PG->>PG: zero 4096 entries
         PG->>PG: copy boot_pgd (skip identity RAM)
@@ -407,7 +418,7 @@ sequenceDiagram
     PI->>KM: current = &processes[0]
 ```
 
-End state: 3 complete PCBs, 3 populated PGDs, 3 copies of the user_stub in
+End state: 3 complete PCBs, 3 populated PGDs, 3 user binaries in
 RAM, `current` pointing at PCB 0. **TTBR0 is still unchanged** — boot_pgd
 is still doing the translation.
 
@@ -449,12 +460,12 @@ That's the invariant that makes the context switch compact: swap TTBR0 to
 |------|----------|
 | [kernel/include/proc.h](../../kernel/include/proc.h) | `process_t`, `proc_context_t`, `task_state_t`, API |
 | [kernel/proc/process.c](../../kernel/proc/process.c) | `processes[3]`, `proc_pgd[3]`, `proc_kstack[3]`, init logic |
-| [kernel/arch/arm/proc/user_stub.S](../../kernel/arch/arm/proc/user_stub.S) | Inline user stub (`.user_stub` section) |
+| [kernel/arch/arm/proc/user_binaries.S](../../kernel/arch/arm/proc/user_binaries.S) | Embedded user binaries (`.user_binaries` section) |
 | [kernel/arch/arm/mm/pgtable.c](../../kernel/arch/arm/mm/pgtable.c) | Added `pgtable_build_for_proc` |
 | [kernel/include/mmu.h](../../kernel/include/mmu.h) | Added `PDE_USER_TEXT`, new prototypes |
 | [kernel/include/platform.h](../../kernel/include/platform.h) | `USER_VIRT_BASE`, `NUM_PROCESSES`, `KSTACK_SIZE` (shared VA layout) |
 | [kernel/platform/qemu/board.h](../../kernel/platform/qemu/board.h) / [bbb/board.h](../../kernel/platform/bbb/board.h) | Per-board addresses + `USER_PHYS_BASE`, `USER_PHYS_STRIDE` |
-| [kernel/linker/kernel_qemu.ld](../../kernel/linker/kernel_qemu.ld) | `.user_stub` section, input pattern `.bss.proc_pgd` aligned 16 KB |
+| [kernel/linker/kernel_qemu.ld](../../kernel/linker/kernel_qemu.ld) | `.user_binaries` section, input pattern `.bss.proc_pgd` aligned 16 KB |
 | [kernel/linker/kernel_bbb.ld](../../kernel/linker/kernel_bbb.ld) | Same as kernel_qemu.ld |
 | [kernel/main.c](../../kernel/main.c) | Calls `process_init_all()`, tests T7/T8/T9 |
 
@@ -576,7 +587,7 @@ Three new tests added to `run_boot_tests`:
 |------|------|
 | [kernel/include/proc.h](../../kernel/include/proc.h) | Public types + API |
 | [kernel/proc/process.c](../../kernel/proc/process.c) | Static init logic |
-| [kernel/arch/arm/proc/user_stub.S](../../kernel/arch/arm/proc/user_stub.S) | User stub source |
+| [kernel/arch/arm/proc/user_binaries.S](../../kernel/arch/arm/proc/user_binaries.S) | User binary embedding |
 | [kernel/arch/arm/mm/pgtable.c](../../kernel/arch/arm/mm/pgtable.c) | `pgtable_build_for_proc` |
 | [kernel/main.c](../../kernel/main.c) | Wire-up + tests |
 
@@ -678,7 +689,7 @@ flowchart LR
 ```
 
 Điểm mới: sau khi IRQ hoạt động, kernel build 3 PCB tĩnh — mỗi PCB có L1 table riêng,
-kernel stack riêng, 1 MB user memory riêng (chứa bản sao của user_stub). TTBR0 **không**
+kernel stack riêng, 1 MB user memory riêng (chứa binary của process đó). TTBR0 **không**
 bị swap — boot_pgd vẫn đang active, `current` chỉ là một pointer debug. Chapter sau mới
 thực sự chuyển CPU vào process.
 
@@ -841,7 +852,7 @@ RAM_BASE + 0x110000  │  ★ proc_pgd[2]     (16 KB)   │
                      │  ★ processes[3]               │
                      │  SVC/IRQ/ABT/UND/FIQ stacks  │
 RAM_BASE + 0x200000  ├──────────────────────────────┤
-                     │  ★ Process 0 user memory 1MB │  ← user_stub copy
+                     │  ★ Process 0 user memory 1MB │  ← user binary
 RAM_BASE + 0x300000  ├──────────────────────────────┤
                      │  ★ Process 1 user memory 1MB │
 RAM_BASE + 0x400000  ├──────────────────────────────┤
@@ -896,27 +907,39 @@ Kết quả:
 
 ### Inline user stub — 3 bản sao vật lý
 
-Code mà process sẽ chạy được **nhúng trong kernel image** như một section `.user_stub`:
+Code mà process sẽ chạy được **nhúng trong kernel image** như một section `.user_binaries`:
 
 ```asm
-.section .user_stub, "ax"
-user_stub_start:
-    mov     r0, #1
-1:  b       1b
-user_stub_end:
+.section .user_binaries, "a"
+.align  4
+
+.global _counter_img_start
+.global _counter_img_end
+_counter_img_start:
+    .incbin "build/user/counter.bin"
+_counter_img_end:
+
+.global _runaway_img_start
+.global _runaway_img_end
+_runaway_img_start:
+    .incbin "build/user/runaway.bin"
+_runaway_img_end:
+
+.global _shell_img_start
+.global _shell_img_end
+_shell_img_start:
+    .incbin "build/user/shell.bin"
+_shell_img_end:
 ```
 
-Một chuỗi instruction ngắn (không cần làm gì thật — process chưa chạy). `process_init_all`
-dùng `memcpy` ghi các byte này vào 3 PA khác nhau (PA+0x200000, PA+0x300000, PA+0x400000).
+Ba chương trình user thật (counter, runaway, shell), mỗi cái được build riêng thành file
+`.bin` flat tại VA `0x40000000`, nhúng qua `.incbin`. Section flags là `"a"` (allocatable),
+không phải `"ax"` — các byte này không được execute ngay trong kernel; chúng được copy
+vào user memory của từng process.
 
-Tại sao copy thay vì share cùng một bản? Nếu cả 3 process trỏ `pgd[0x400]` về cùng một
-PA, thì ở góc độ physical, **không có isolation** — 1 địa chỉ RAM duy nhất chứa code,
-một process patch ghi vào nó sẽ ảnh hưởng 2 process kia. Copy riêng mỗi bản = isolation
-thật từ tầng vật lý. Mỗi byte code đều có địa chỉ RAM riêng biệt.
-
-Lần chap sau khi có syscall, 3 process sẽ thực thi đúng cùng logic (vì bản copy byte-by-
-byte), nhưng có thể **modify code** của chính mình mà không ảnh hưởng process khác — đây
-là mô hình đúng với OS thật.
+`process_init_all` dùng `kmemcpy` copy mỗi binary vào PA slot riêng của nó (PA+0x200000,
+PA+0x300000, PA+0x400000). Mỗi process nhận bản copy vật lý của binary riêng — isolation
+ở tầng byte. Process có self-modify code lúc runtime cũng chỉ ảnh hưởng PA của chính nó.
 
 ### Initial kernel stack frame — dựng trước, dùng sau
 
@@ -968,8 +991,8 @@ sequenceDiagram
     loop i = 0, 1, 2
         PI->>PCB: zero, set pid/name/state=READY
         PI->>PCB: pgd = proc_pgd[i]<br/>kstack = proc_kstack[i]<br/>user_pa = RAM+0x200000+i*0x100000
-        PI->>MC: memcpy(user_pa, user_stub_start, stub_size)
-        Note over MC: 3 bản copy vật lý
+        PI->>MC: kmemcpy(user_va, img->start, img_size)
+        Note over MC: 3 binary khác nhau
         PI->>PG: pgtable_build_for_proc(pgd, user_pa)
         PG->>PG: zero 4096 entries
         PG->>PG: copy boot_pgd (skip identity RAM)
@@ -979,7 +1002,7 @@ sequenceDiagram
     PI->>KM: current = &processes[0]
 ```
 
-Kết thúc hàm: 3 PCB hoàn chỉnh, 3 PGD populated, 3 bản user_stub trong RAM, `current`
+Kết thúc hàm: 3 PCB hoàn chỉnh, 3 PGD populated, 3 user binary trong RAM, `current`
 trỏ vào PCB 0. **TTBR0 vẫn chưa đổi** — boot_pgd đang dịch địa chỉ.
 
 ### Hai bản đồ song song — boot_pgd vs proc_pgd[i]
@@ -1019,12 +1042,12 @@ user code ở `0x40000000` giờ trỏ đúng PA của process mới.
 |------|----------|
 | [kernel/include/proc.h](../../kernel/include/proc.h) | `process_t`, `proc_context_t`, `task_state_t`, API |
 | [kernel/proc/process.c](../../kernel/proc/process.c) | `processes[3]`, `proc_pgd[3]`, `proc_kstack[3]`, init logic |
-| [kernel/arch/arm/proc/user_stub.S](../../kernel/arch/arm/proc/user_stub.S) | Inline user stub (section `.user_stub`) |
+| [kernel/arch/arm/proc/user_binaries.S](../../kernel/arch/arm/proc/user_binaries.S) | Inline user stub (section `.user_binaries`) |
 | [kernel/arch/arm/mm/pgtable.c](../../kernel/arch/arm/mm/pgtable.c) | Thêm `pgtable_build_for_proc` |
 | [kernel/include/mmu.h](../../kernel/include/mmu.h) | Thêm `PDE_USER_TEXT`, prototype mới |
 | [kernel/include/platform.h](../../kernel/include/platform.h) | `USER_VIRT_BASE`, `NUM_PROCESSES`, `KSTACK_SIZE` (shared VA layout) |
 | [kernel/platform/qemu/board.h](../../kernel/platform/qemu/board.h) / [bbb/board.h](../../kernel/platform/bbb/board.h) | Per-board addresses + `USER_PHYS_BASE`, `USER_PHYS_STRIDE` |
-| [kernel/linker/kernel_qemu.ld](../../kernel/linker/kernel_qemu.ld) | Section `.user_stub`, input pattern `.bss.proc_pgd` aligned 16 KB |
+| [kernel/linker/kernel_qemu.ld](../../kernel/linker/kernel_qemu.ld) | Section `.user_binaries`, input pattern `.bss.proc_pgd` aligned 16 KB |
 | [kernel/linker/kernel_bbb.ld](../../kernel/linker/kernel_bbb.ld) | Tương tự kernel_qemu.ld |
 | [kernel/main.c](../../kernel/main.c) | Gọi `process_init_all()`, tests T7/T8/T9 |
 
@@ -1138,7 +1161,7 @@ Thêm 3 test vào `run_boot_tests`:
 |------|---------|
 | [kernel/include/proc.h](../../kernel/include/proc.h) | Public types + API |
 | [kernel/proc/process.c](../../kernel/proc/process.c) | Static init logic |
-| [kernel/arch/arm/proc/user_stub.S](../../kernel/arch/arm/proc/user_stub.S) | User stub source |
+| [kernel/arch/arm/proc/user_binaries.S](../../kernel/arch/arm/proc/user_binaries.S) | User binary embedding |
 | [kernel/arch/arm/mm/pgtable.c](../../kernel/arch/arm/mm/pgtable.c) | `pgtable_build_for_proc` |
 | [kernel/main.c](../../kernel/main.c) | Wire + tests |
 

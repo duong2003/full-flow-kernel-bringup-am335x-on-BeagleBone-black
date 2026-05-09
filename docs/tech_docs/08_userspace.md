@@ -194,7 +194,7 @@ static const user_image_t user_images[NUM_PROCESSES] = {
 
 ```
 State before chapter 08:
-- user_stub.S: a single shared asm file, copy-pasted into 3 processes (chapter 05)
+- user_binaries.S: 3 separate user programs (.incbin), copied into per-process PA slots
 - Syscall ABI: 4 Tier-1 calls ready (chapter 07)
 - MMU: proc_pgd[i] maps VA 0x40000000 → each process's own user PA slot
 - Fault isolation: user crash doesn't kill the kernel (chapter 07)
@@ -210,8 +210,8 @@ actually demo multi-process behavior.
 1. **No user project structure.** We need a directory tree, linker script,
    Makefile rules — everything has to build independently of the kernel but
    still bundle in.
-2. **The kernel has no per-pid binary load mechanism.** `user_stub` is currently
-   a shared `extern char[]`. We need to dispatch "pid i → binary i".
+2. **The kernel has no per-pid binary load mechanism.** User binaries are currently
+   embedded via extern `_*_img_start[]`. We need to dispatch "pid i → binary i".
 3. **Cache coherency.** The kernel writes user bytes via the D-path (memcpy
    goes through D-cache). The user's I-fetch goes through I-cache. Without
    cleaning D-cache + invalidating I-cache before user runs, the user reads
@@ -711,8 +711,8 @@ thật sự.
 
 1. **Không có cấu trúc project user.** Cần thư mục, linker script, Makefile rules —
    toàn bộ cần build độc lập khỏi kernel nhưng vẫn bundle được.
-2. **Kernel không có cơ chế load binary theo pid.** `user_stub` hiện là `extern
-   char[]` chung. Cần dispatch "pid i → binary i".
+2. **Kernel không có cơ chế load binary theo pid.** User binary hiện được nhúng
+   qua extern `_*_img_start[]`. Cần dispatch "pid i → binary i".
 3. **Cache coherency.** Kernel ghi user bytes qua D-path (memcpy đi qua D-cache).
    User I-fetch đi qua I-cache. Nếu không clean D-cache + invalidate I-cache trước
    khi user chạy, user đọc RAM cũ (zero hoặc rác).

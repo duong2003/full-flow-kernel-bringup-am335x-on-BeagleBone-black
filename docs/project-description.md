@@ -198,6 +198,7 @@ theo Linux ARM EABI:
 | `getpid`  | Lấy ID của process hiện tại                                          |
 | `ps`      | Format process table vào user buffer                                 |
 | `kill`    | Kill process theo pid (state → DEAD, scheduler skip)                 |
+| `ticks`   | Đọc số clock tick hiện tại (timer_get_ticks)                         |
 
 **Syscall pointer validation:**
 

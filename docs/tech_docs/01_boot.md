@@ -34,7 +34,7 @@ This is the first chapter — everything is new (★). After this chapter, the s
 │   │   NS16550 (BBB) │    │   stacks/BSS/jumpC  │     │
 │   └─────────────────┘    └─────────────────────┘     │
 │                                                      │
-│   MMU: OFF · IRQ: masked · Exceptions: not yet       │
+│   MMU: ON (enabled in start.S) · IRQ: masked · Exceptions: not yet │
 └──────────────────────────────────────────────────────┘
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                       Hardware
@@ -45,11 +45,11 @@ This is the first chapter — everything is new (★). After this chapter, the s
 
 ```mermaid
 flowchart LR
-    A[Reset] --> B["★ start.S<br/>mask IRQ<br/>setup stacks<br/>zero BSS"]
+    A[Reset] --> B["★ start.S<br/>mask IRQ<br/>compute PHYS_OFFSET<br/>SVC stack@PA · zero BSS<br/>mmu_init · trampoline<br/>all stacks@VA"]
     B --> C["★ kmain"]
     C --> D["★ uart_init"]
     D --> E[boot log]
-    E --> F[idle loop]
+    E --> F[boot continues<br/>→ next chapters]
 
     style B fill:#ffe699,stroke:#e8a700,color:#000
     style C fill:#ffe699,stroke:#e8a700,color:#000
@@ -243,8 +243,12 @@ sequenceDiagram
 
     ROM->>Start: PC ← _start
     Note over Start: cpsid if<br/>(mask IRQ + FIQ)
-    Note over Start: cps→FIQ, ldr sp<br/>cps→IRQ, ldr sp<br/>cps→ABT, ldr sp<br/>cps→UND, ldr sp<br/>cps→SVC, ldr sp
-    Note over Start: zero BSS<br/>(loop _bss_start → _bss_end)
+    Note over Start: adr + ldr =_start<br/>→ PHYS_OFFSET in r4
+    Note over Start: cps→SVC, ldr sp @ PA<br/>(only SVC — enough for mmu_init)
+    Note over Start: zero BSS @ PA<br/>(VA symbols − PHYS_OFFSET)
+    Start->>Start: bl mmu_init → MMU on
+    Start->>Start: ldr pc, =_start_va<br/>trampoline → high VA
+    Note over Start: setup FIQ/IRQ/ABT/UND/SVC<br/>stacks @ VA (MMU now on)
     Start->>kmain: bl kmain
     kmain->>UART: uart_init()
     kmain->>UART: uart_printf("RingNova...")
@@ -276,69 +280,69 @@ Why first: if some hardware is asserting an IRQ line
 (timer from a previous boot not cleared), the CPU will jump into the IRQ handler immediately —
 but the handler doesn't exist yet.
 
-**Block 2 — Setup exception stacks:**
+**Block 2 — Setup SVC stack at PA (others come later at VA):**
 
 ```asm
-/* FIQ mode — 512 B */
-cps     #0x11
-ldr     sp, =_fiq_stack_top
-
-/* IRQ mode — 1 KB */
-cps     #0x12
-ldr     sp, =_irq_stack_top
-
-/* Abort mode — 1 KB */
-cps     #0x17
-ldr     sp, =_abt_stack_top
-
-/* Undefined mode — 1 KB */
-cps     #0x1B
-ldr     sp, =_und_stack_top
-
-/* SVC mode — 8 KB; kernel runs here */
+/* SVC mode — 8 KB; pre-MMU kernel needs this for mmu_init */
 cps     #0x13
-ldr     sp, =_svc_stack_top
+ldr     r1, =_svc_stack_top             @ VA symbol
+sub     sp, r1, r4                      @ sp = PA — MMU still off
 ```
 
-Repeating pattern: `cps` switches to mode → `ldr sp` sets the stack pointer for that mode.
+At this point MMU is off, so all linker symbols resolve to VA. We MUST subtract
+PHYS_OFFSET (held in `r4`) to get the physical address. Only SVC stack is set now —
+it's enough for the C function `mmu_init` to have a stack. The remaining 4 mode stacks
+(FIQ/IRQ/ABT/UND) are set up later, after MMU is on and PC has trampolined to VA
+(see Block 4 — `_start_va`).
 
-`_fiq_stack_top`, `_irq_stack_top`, ... are symbols from the linker script — they point to the **top**
-of the RAM region reserved for each stack. Stacks grow downward, so SP starts at the top.
+`_svc_stack_top` is a symbol from the linker script — it points to the **top**
+of the RAM region reserved for the SVC stack. Stacks grow downward, so SP starts at the top.
 
-**SVC must be the last mode** — because `kmain` runs in SVC mode. After this block, the CPU is in SVC mode
-with SP_svc set.
-
-**Block 3 — Zero BSS:**
+**Block 3 — Zero BSS (at PA, MMU off):**
 
 ```asm
-ldr     r0, =_bss_start
-ldr     r1, =_bss_end
-mov     r2, #0
+ldr     r1, =_bss_start                 @ VA symbol
+ldr     r2, =_bss_end                   @ VA symbol
+sub     r1, r1, r4                      @ PA of _bss_start
+sub     r2, r2, r4                      @ PA of _bss_end
+mov     r3, #0
 .Lzero_bss:
-    cmp     r0, r1
-    strlo   r2, [r0], #4    /* store 0, advance 4 bytes */
+    cmp     r1, r2
+    strlo   r3, [r1], #4    /* store 0, advance 4 bytes */
     blo     .Lzero_bss
 ```
 
-Simple loop: from `_bss_start` to `_bss_end`, write 0 to every 4 bytes.
+`_bss_start` and `_bss_end` are linker script symbols — they resolve to VA. Before MMU
+is on, we must subtract `PHYS_OFFSET` (held in `r4`) to get their PA, otherwise the loop
+would dereference unmapped addresses and crash.
 
-`_bss_start` and `_bss_end` are linker script symbols — the linker knows where the BSS section
-starts and ends in RAM.
+`strlo` = store if lower (cmp r1, r2 → if r1 < r2 then store). `[r1], #4` = write to
+address r1 then increment r1 by 4 (post-increment). Effect: write 0, advance 4 bytes, repeat.
 
-`strlo` = store if lower (cmp r0, r1 → if r0 < r1 then store). `[r0], #4` = write to
-address r0 then increment r0 by 4 (post-increment). Effect: write 0, advance 4 bytes, repeat.
-
-**Block 4 — Jump to mmu_init, trampoline, then kmain:**
+**Block 4 — Jump to mmu_init, trampoline, setup VA stacks, then kmain:**
 
 ```asm
-mov     r0, r4                  @ r0 = phys_offset
-bl      mmu_init                @ PC-relative, runs at PA
+mov     r0, r4                          @ r0 = phys_offset
+bl      mmu_init                        @ PC-relative, runs at PA
 
-ldr     pc, =_start_va          @ absolute load = VA trampoline
+ldr     pc, =_start_va                  @ absolute load = VA trampoline
 
 _start_va:
-    /* re-setup all mode stacks at VA */
-    ...
+    cps     #0x11                       @ FIQ
+    ldr     sp, =_fiq_stack_top
+
+    cps     #0x12                       @ IRQ
+    ldr     sp, =_irq_stack_top
+
+    cps     #0x17                       @ ABT
+    ldr     sp, =_abt_stack_top
+
+    cps     #0x1B                       @ UND
+    ldr     sp, =_und_stack_top
+
+    cps     #0x13                       @ SVC — kernel mode
+    ldr     sp, =_svc_stack_top
+
     bl      kmain
 ```
 
@@ -350,6 +354,10 @@ function returns, then returns to `_start`.
 `ldr pc, =_start_va` loads the literal `_start_va` (high VA `0xC01000..`) then jumps. This is
 the trampoline moment: the next instruction fetch goes through the MMU at VA. From label `_start_va`
 onwards, everything runs at VA.
+
+At `_start_va`, the remaining 4 mode stacks (FIQ/IRQ/ABT/UND) are set up at VA — now that MMU
+is on, `ldr sp, =_fiq_stack_top` correctly loads the VA without any PHYS_OFFSET conversion.
+SVC stack is re-set at VA too, replacing the PA SVC stack from Block 2.
 
 `kmain` never returns. If it does (bug), the CPU falls into a halt loop:
 
@@ -405,7 +413,7 @@ VMA 0xC0100000  ┌──────────────────┐  LM
                 │  .text.start     │  ← _start
                 │  .text.*         │
                 ├──────────────────┤
-                │ .user_stub       │  user code template
+                │ .user_binaries    │  embedded user programs
                 ├──────────────────┤
                 │ .data            │  initialized global variables
                 ├──────────────────┤
@@ -600,7 +608,7 @@ Chapter 02 fixes that.
 │   │   NS16550 (BBB) │    │   stacks/BSS/jumpC  │     │
 │   └─────────────────┘    └─────────────────────┘     │
 │                                                      │
-│   MMU: OFF · IRQ: masked · Exceptions: chưa có       │
+│   MMU: ON (bật trong start.S) · IRQ: masked · Exceptions: chưa có │
 └──────────────────────────────────────────────────────┘
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                       Hardware
@@ -611,11 +619,11 @@ Chapter 02 fixes that.
 
 ```mermaid
 flowchart LR
-    A[Reset] --> B["★ start.S<br/>mask IRQ<br/>setup stacks<br/>zero BSS"]
+    A[Reset] --> B["★ start.S<br/>mask IRQ<br/>compute PHYS_OFFSET<br/>SVC stack@PA · zero BSS<br/>mmu_init · trampoline<br/>all stacks@VA"]
     B --> C["★ kmain"]
     C --> D["★ uart_init"]
     D --> E[boot log]
-    E --> F[idle loop]
+    E --> F[boot continues<br/>→ next chapters]
 
     style B fill:#ffe699,stroke:#e8a700,color:#000
     style C fill:#ffe699,stroke:#e8a700,color:#000
@@ -810,8 +818,12 @@ sequenceDiagram
 
     ROM->>Start: PC ← _start
     Note over Start: cpsid if<br/>(mask IRQ + FIQ)
-    Note over Start: cps→FIQ, ldr sp<br/>cps→IRQ, ldr sp<br/>cps→ABT, ldr sp<br/>cps→UND, ldr sp<br/>cps→SVC, ldr sp
-    Note over Start: zero BSS<br/>(loop _bss_start → _bss_end)
+    Note over Start: adr + ldr =_start<br/>→ PHYS_OFFSET in r4
+    Note over Start: cps→SVC, ldr sp @ PA<br/>(only SVC — enough for mmu_init)
+    Note over Start: zero BSS @ PA<br/>(VA symbols − PHYS_OFFSET)
+    Start->>Start: bl mmu_init → MMU on
+    Start->>Start: ldr pc, =_start_va<br/>trampoline → high VA
+    Note over Start: setup FIQ/IRQ/ABT/UND/SVC<br/>stacks @ VA (MMU now on)
     Start->>kmain: bl kmain
     kmain->>UART: uart_init()
     kmain->>UART: uart_printf("RingNova...")
@@ -846,69 +858,68 @@ Tại sao phải làm đầu tiên: nếu hardware nào đó đang assert IRQ li
 (timer từ lần boot trước chưa clear), CPU sẽ nhảy vào IRQ handler ngay — mà handler
 chưa tồn tại.
 
-**Block 2 — Setup exception stacks:**
+**Block 2 — Setup SVC stack ở PA (các stack còn lại setup sau ở VA):**
 
 ```asm
-/* FIQ mode — 512 B */
-cps     #0x11
-ldr     sp, =_fiq_stack_top
-
-/* IRQ mode — 1 KB */
-cps     #0x12
-ldr     sp, =_irq_stack_top
-
-/* Abort mode — 1 KB */
-cps     #0x17
-ldr     sp, =_abt_stack_top
-
-/* Undefined mode — 1 KB */
-cps     #0x1B
-ldr     sp, =_und_stack_top
-
-/* SVC mode — 8 KB; kernel runs here */
+/* SVC mode — 8 KB; pre-MMU kernel cần stack này cho mmu_init */
 cps     #0x13
-ldr     sp, =_svc_stack_top
+ldr     r1, =_svc_stack_top             @ VA symbol
+sub     sp, r1, r4                      @ sp = PA — MMU vẫn đang OFF
 ```
 
-Pattern lặp lại: `cps` chuyển sang mode → `ldr sp` set stack pointer cho mode đó.
+Lúc này MMU vẫn OFF, mọi symbol từ linker đều resolve ra VA. PHẢI trừ PHYS_OFFSET
+(đang ở `r4`) để ra PA, nếu không sẽ dereference VA unmapped → crash. Chỉ set SVC stack
+ở bước này — đủ để C function `mmu_init` có stack. 4 mode stack còn lại (FIQ/IRQ/ABT/UND)
+được set sau, khi MMU đã ON và PC đã trampoline lên VA (xem Block 4 — `_start_va`).
 
-`_fiq_stack_top`, `_irq_stack_top`, ... là symbol từ linker script — chúng trỏ đến **đỉnh**
-của vùng RAM được dành cho từng stack. Stack mọc xuống, nên SP bắt đầu ở đỉnh.
+`_svc_stack_top` là symbol từ linker script — trỏ đến **đỉnh** của vùng RAM dành cho
+SVC stack. Stack mọc xuống, nên SP bắt đầu ở đỉnh.
 
-**SVC phải là mode cuối cùng** — vì `kmain` chạy ở SVC mode. Sau block này, CPU ở SVC mode
-với SP_svc đã set.
-
-**Block 3 — Zero BSS:**
+**Block 3 — Zero BSS (ở PA, MMU off):**
 
 ```asm
-ldr     r0, =_bss_start
-ldr     r1, =_bss_end
-mov     r2, #0
+ldr     r1, =_bss_start                 @ VA symbol
+ldr     r2, =_bss_end                   @ VA symbol
+sub     r1, r1, r4                      @ PA của _bss_start
+sub     r2, r2, r4                      @ PA của _bss_end
+mov     r3, #0
 .Lzero_bss:
-    cmp     r0, r1
-    strlo   r2, [r0], #4    /* store 0, advance 4 bytes */
+    cmp     r1, r2
+    strlo   r3, [r1], #4    /* store 0, advance 4 bytes */
     blo     .Lzero_bss
 ```
 
-Vòng lặp đơn giản: từ `_bss_start` đến `_bss_end`, ghi 0 vào mỗi 4 byte.
+`_bss_start` và `_bss_end` là symbol từ linker script — chúng resolve ra VA. Trước khi MMU
+bật, phải trừ `PHYS_OFFSET` (đang ở `r4`) để ra PA, nếu không vòng lặp sẽ dereference
+address unmapped → crash.
 
-`_bss_start` và `_bss_end` là symbol từ linker script — linker biết BSS section
-bắt đầu và kết thúc ở đâu trong RAM.
+`strlo` = store if lower (cmp r1, r2 → nếu r1 < r2 thì store). `[r1], #4` = ghi vào
+address r1 rồi tăng r1 thêm 4 (post-increment). Hiệu quả: ghi 0, tiến 4 byte, lặp.
 
-`strlo` = store if lower (cmp r0, r1 → nếu r0 < r1 thì store). `[r0], #4` = ghi vào
-address r0 rồi tăng r0 thêm 4 (post-increment). Hiệu quả: ghi 0, tiến 4 byte, lặp.
-
-**Block 4 — Jump to mmu_init, trampoline, then kmain:**
+**Block 4 — Jump to mmu_init, trampoline, setup VA stacks, then kmain:**
 
 ```asm
-mov     r0, r4                  @ r0 = phys_offset
-bl      mmu_init                @ PC-relative, runs at PA
+mov     r0, r4                          @ r0 = phys_offset
+bl      mmu_init                        @ PC-relative, runs at PA
 
-ldr     pc, =_start_va          @ absolute load = VA trampoline
+ldr     pc, =_start_va                  @ absolute load = VA trampoline
 
 _start_va:
-    /* re-setup all mode stacks at VA */
-    ...
+    cps     #0x11                       @ FIQ
+    ldr     sp, =_fiq_stack_top
+
+    cps     #0x12                       @ IRQ
+    ldr     sp, =_irq_stack_top
+
+    cps     #0x17                       @ ABT
+    ldr     sp, =_abt_stack_top
+
+    cps     #0x1B                       @ UND
+    ldr     sp, =_und_stack_top
+
+    cps     #0x13                       @ SVC — kernel mode
+    ldr     sp, =_svc_stack_top
+
     bl      kmain
 ```
 
@@ -920,6 +931,10 @@ function, rồi return về `_start`.
 `ldr pc, =_start_va` load literal `_start_va` (VA cao `0xC01000..`) rồi jump. Đây là
 khoảnh khắc trampoline: instruction kế tiếp fetch qua MMU tại VA. Từ nhãn `_start_va`
 trở đi, mọi thứ chạy ở VA.
+
+Tại `_start_va`, 4 mode stack còn lại (FIQ/IRQ/ABT/UND) được set ở VA — lúc này MMU đã ON,
+`ldr sp, =_fiq_stack_top` load VA chính xác mà không cần convert PHYS_OFFSET. SVC stack
+cũng được set lại ở VA, thay thế SVC stack PA từ Block 2.
 
 `kmain` không bao giờ return. Nếu nó return (bug), CPU rơi vào halt loop:
 
@@ -975,7 +990,7 @@ VMA 0xC0100000  ┌──────────────────┐  LM
                 │  .text.start     │  ← _start
                 │  .text.*         │
                 ├──────────────────┤
-                │ .user_stub       │  user code template
+                │ .user_binaries    │  embedded user programs
                 ├──────────────────┤
                 │ .data            │  biến global đã khởi tạo
                 ├──────────────────┤
