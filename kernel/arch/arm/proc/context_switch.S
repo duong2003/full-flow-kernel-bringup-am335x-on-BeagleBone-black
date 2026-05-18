@@ -1,4 +1,4 @@
-/* ===========================================================
+/* ============================================================
  * kernel/arch/arm/proc/context_switch.S — bidirectional switch
  *
  * void context_switch(process_t *prev, process_t *next);

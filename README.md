@@ -125,7 +125,7 @@ corrupt B or C.
 | [08 Userspace](docs/tech_docs/08_userspace.md)   | crt0, libc, per-app build, .incbin bundle, cache sync                    |
 | [09 Shell](docs/tech_docs/09_shell.md)           | UART RX IRQ + ring buffer, sys_read blocking, command parser             |
 
-Memory layout: [docs/memory-architecture.md](docs/memory-architecture.md).
+Memory layout: [docs/address-space-design.md](docs/address-space-design.md).
 Project description: [docs/project-description.md](docs/project-description.md).
 
 ### Toolchain
@@ -298,7 +298,7 @@ crash không corrupt B/C.
 | [08 Userspace](docs/tech_docs/08_userspace.md)   | crt0, libc, per-app build, .incbin bundle, cache sync                  |
 | [09 Shell](docs/tech_docs/09_shell.md)           | UART RX IRQ + ring buffer, sys_read blocking, command parser           |
 
-Memory layout chi tiết: [docs/memory-architecture.md](docs/memory-architecture.md).
+Memory layout chi tiết: [docs/address-space-design.md](docs/address-space-design.md).
 Mô tả dự án: [docs/project-description.md](docs/project-description.md).
 
 ### Toolchain

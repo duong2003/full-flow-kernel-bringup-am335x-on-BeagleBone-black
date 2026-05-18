@@ -1,4 +1,4 @@
-/* ===========================================================
+/* ============================================================
  * kernel/arch/arm/exception/vectors.S — ARM exception vector table
  *
  * Uses LDR PC from literal pool pattern — allows handlers to

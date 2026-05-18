@@ -37,7 +37,7 @@
 /* DMTIMER2 fed from CLK_M_OSC = 24 MHz */
 #define TIMER_CLK_HZ     24000000U
 
-/* IRQ lines on the AM335x INTC (TRM Table 6-1) */
+/* IRQ lines on the AM335x INTC */
 #define IRQ_TIMER        68U  /* DMTIMER2 */
 #define IRQ_UART0        72U  /* UART0INT */
 

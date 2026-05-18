@@ -62,8 +62,8 @@ static struct intc_device bbb_intc = {
  *
  * Reset default is not M_OSC, and the bootloader may leave it as
  * TCLKIN or 32KHZ — in which case DMTIMER2 would run at a random
- * slow rate. AM335x TRM requires changing CLKSEL only while the
- * module is in DISABLED idle state.
+ * slow rate. CLKSEL must be changed only while the module is in
+ * DISABLED idle state.
  */
 #define CM_DPLL_BASE            0x44E00500U
 #define CM_CLKSEL_TIMER2_CLK    0x08U

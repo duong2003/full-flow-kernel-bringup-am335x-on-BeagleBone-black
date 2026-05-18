@@ -1,4 +1,4 @@
-/* ===========================================================
+/* ============================================================
  * kernel/arch/arm/boot/start.S — RingNova reset entry point
  *
  * Linkage (see kernel/linker/kernel_*.ld):

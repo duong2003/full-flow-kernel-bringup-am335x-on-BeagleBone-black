@@ -1,4 +1,4 @@
-/* ===========================================================
+/* ============================================================
  * kernel/arch/arm/exception/exception_entry.S — Low-level
  * exception entry stubs
  *

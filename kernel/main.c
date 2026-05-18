@@ -1,4 +1,4 @@
-/* ===========================================================
+/* ============================================================
  * kernel/main.c — Kernel C entry point
  *
  * kmain() runs at high VA after start.S has enabled the MMU
