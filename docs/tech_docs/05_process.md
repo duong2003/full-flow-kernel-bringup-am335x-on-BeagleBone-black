@@ -269,7 +269,7 @@ the MMU. That's why the project diagram cares about PA-level isolation vs
 VA-level isolation.
 
 Per-process kernel stacks are placed by the linker in BSS — their exact PA
-depends on layout, not the `+0x117000` figure the memory-architecture doc
+depends on layout, not the `+0x117000` figure the address-space-design doc
 suggests. What matters is that each stack sits in the kernel region
 (high-half), 8 KB each, 8-byte aligned — all satisfied. The `kstack_base`
 field in the PCB holds the actual address the linker computed.
@@ -865,7 +865,7 @@ chạm được vào ô của B ngay ở tầng physical, chưa kể MMU. Đây 
 chú ý phân biệt PA-level isolation vs VA-level isolation.
 
 Kernel stack per-process được linker đặt trong BSS — PA chính xác tùy layout, không cố
-định `+0x117000` như doc memory-architecture đề xuất. Điều gì quan trọng là stack nằm
+định `+0x117000` như doc address-space-design đề xuất. Điều gì quan trọng là stack nằm
 trong kernel region (cao), 8 KB mỗi stack, align 8-byte — đều thỏa. Symbol `kstack_base`
 trong PCB trỏ đến địa chỉ cụ thể được linker tính.
 
