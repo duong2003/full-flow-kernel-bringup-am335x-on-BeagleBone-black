@@ -4,6 +4,24 @@
 > preemptively through an interactive shell — ~5000 lines of C + assembly,
 > no framework.
 
+<div align="center">
+
+### Kiến trúc hệ thống / System Architecture
+
+![System Architecture](docs/image/architechture.png)
+
+*Tổng quan các thành phần kernel: boot → MMU → scheduler → syscall → userspace*
+
+---
+
+### Log khởi động / Boot Log
+
+![Boot Log](docs/image/booting.png)
+
+*Quá trình boot trên QEMU realview-pb-a8: từ start.S → MMU → scheduler → shell prompt*
+
+</div>
+
 [English](#english) · [Tiếng Việt](#tiếng-việt)
 
 ---
