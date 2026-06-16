@@ -811,24 +811,36 @@ C code:                    C code:                  C code:
 
 ```mermaid
 sequenceDiagram
-    participant ROM as ROM/QEMU loader
-    participant Start as start.S
+    participant ROM as "ROM/QEMU Loader"
+    participant Start as "start.S"
     participant UART
-    participant kmain
+    participant KMain as "kmain"
 
-    ROM->>Start: PC ← _start
-    Note over Start: cpsid if<br/>(mask IRQ + FIQ)
-    Note over Start: adr + ldr =_start<br/>→ PHYS_OFFSET in r4
-    Note over Start: cps→SVC, ldr sp @ PA<br/>(only SVC — enough for mmu_init)
-    Note over Start: zero BSS @ PA<br/>(VA symbols − PHYS_OFFSET)
-    Start->>Start: bl mmu_init → MMU on
-    Start->>Start: ldr pc, =_start_va<br/>trampoline → high VA
-    Note over Start: setup FIQ/IRQ/ABT/UND/SVC<br/>stacks @ VA (MMU now on)
-    Start->>kmain: bl kmain
-    kmain->>UART: uart_init()
-    kmain->>UART: uart_printf("RingNova...")
-    kmain->>UART: in boot log<br/>(.text/.data/.bss/CPSR)
-    Note over kmain: for(;;) — idle loop
+    ROM->>Start: PC = _start
+
+    Note over Start: cpsid if<br/>Mask IRQ and FIQ
+
+    Note over Start: adr + ldr _start<br/>Compute PHYS_OFFSET into r4
+
+    Note over Start: Switch to SVC mode<br/>Load SVC stack at PA
+
+    Note over Start: Clear BSS at PA<br/>VA symbols minus PHYS_OFFSET
+
+    Start->>Start: bl mmu_init
+    Note over Start: MMU enabled
+
+    Start->>Start: ldr pc, _start_va
+    Note over Start: Trampoline to high VA
+
+    Note over Start: Setup FIQ IRQ ABT UND SVC stacks<br/>Running with MMU enabled
+
+    Start->>KMain: bl kmain
+
+    KMain->>UART: uart_init()
+    KMain->>UART: uart_printf("RingNova...")
+    KMain->>UART: Print boot log
+
+    Note over KMain: Infinite idle loop
 ```
 
 Reader chỉ cần nhìn diagram là biết: từ ROM → start.S setup môi trường → kmain init UART
