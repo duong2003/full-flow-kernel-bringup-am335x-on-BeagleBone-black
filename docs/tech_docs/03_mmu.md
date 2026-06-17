@@ -524,16 +524,25 @@ Module có dấu ★ là **mới trong chapter này**, còn lại đã có từ 
 
 ```mermaid
 flowchart LR
-    A[Reset] --> B[start.S<br/>stacks@PA<br/>zero BSS]
+    A[Reset] --> B["start.S<br/>stacks@PA<br/>zero BSS"]
+
     B --> E["★ mmu_init phys_offset<br/>build pgd via PA<br/>enable MMU"]
-    E --> T["★ ldr pc, =_start_va<br/>trampoline PC<br/>→ high VA"]
-    T --> V[_start_va<br/>stacks@VA]
+
+    E --> T["★ ldr pc = _start_va<br/>trampoline PC<br/>→ high VA"]
+
+    T --> V["_start_va<br/>stacks@VA"]
+
     V --> C[kmain]
+
     C --> D[uart_init]
-    D --> F[exception_init<br/>set VBAR]
+
+    D --> F["exception_init<br/>set VBAR"]
+
     F --> G["★ boot self-tests<br/>T1–T5"]
+
     G --> D2["★ mmu_drop_identity<br/>remove PA range"]
-    D2 --> H[irq_init + timer_init<br/>→ process_init_all<br/>→ process_first_run]
+
+    D2 --> H["irq_init + timer_init<br/>process_init_all<br/>process_first_run"]
 
     style E fill:#ffe699,stroke:#e8a700,color:#000
     style T fill:#ffe699,stroke:#e8a700,color:#000
