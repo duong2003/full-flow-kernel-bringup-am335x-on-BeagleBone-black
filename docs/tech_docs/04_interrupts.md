@@ -587,19 +587,22 @@ Module có dấu ★ là **mới trong chapter này**.
 
 ```mermaid
 flowchart LR
-    A[Reset] --> B[start.S<br/>stacks+BSS@PA]
-    B --> E[mmu_init<br/>@PA — câm]
-    E --> T["ldr pc, =_start_va<br/>trampoline"]
-    T --> C[kmain<br/>@VA]
-    C --> D[uart_init]
-    D --> MP[mmu_print_status]
-    MP --> F[exception_init]
-    F --> G["★ irq_init<br/>(INTC reset,<br/>mask all)"]
-    G --> H["★ timer_init<br/>(10 ms period)"]
-    H --> I["★ irq_register<br/>+ irq_enable<br/>(per-line INTC unmask)"]
-    I --> PI[process_init_all]
-    PI --> DI[mmu_drop_identity]
-    DI --> PFR["process_first_run<br/>(rfefd → USR,<br/>CPSR.I=0 atomic)"]
+    A["Reset"] --> B["start.S\nstacks + BSS @ PA"]
+    B --> E["mmu_init\n@PA - cam"]
+    E --> T["ldr pc, =_start_va\ntrampoline"]
+    T --> C["kmain\n@VA"]
+    C --> D["uart_init"]
+    D --> MP["mmu_print_status"]
+    MP --> F["exception_init"]
+
+    F --> G["★ irq_init\n(INTC reset,\nmask all)"]
+    G --> H["★ timer_init\n(10 ms period)"]
+    H --> I["★ irq_register\n+ irq_enable\n(per-line INTC unmask)"]
+
+    I --> PI["process_init_all"]
+    PI --> DI["mmu_drop_identity"]
+
+    DI --> PFR["process_first_run\n(rfefd → USR,\nCPSR.I=0 atomic)"]
 
     style G fill:#ffe699,stroke:#e8a700,color:#000
     style H fill:#ffe699,stroke:#e8a700,color:#000
